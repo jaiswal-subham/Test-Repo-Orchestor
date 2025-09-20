@@ -52,10 +52,7 @@ class ChatResponse(BaseModel):
     reply: str
     state: dict
 
-class EmailRequest(BaseModel):
-    to: str
-    subject: str
-    conversation: str
+
 
 
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> Tuple[str, int]:
@@ -148,14 +145,14 @@ async def chat_endpoint(req: ChatRequest):
     return ChatResponse(reply=final_reply, state=result)
 
 @app.post("/send-email")
-async def send_email(req: EmailRequest):
+async def send_email(req: BaseModel):
     return {
         "status": "ok",
         "message": "Dummy send: email not actually delivered in this mock app.",
         "payload": {
-            "to": req.to,
-            "subject": req.subject,
-            "conversation": req.conversation[:10000],
+            "to": "XYX",
+            "subject": "XYZXT",
+            "conversation": "lorem ipsum lorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsumlorem ipsum",
         },
     }
 
