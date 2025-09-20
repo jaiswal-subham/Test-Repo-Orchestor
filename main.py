@@ -140,7 +140,7 @@ async def chat_endpoint(req: ChatRequest):
         if not entry:
             raise HTTPException(status_code=404, detail="Document id not found")
         pdf_text = entry.get("text", "")
-    print("reached here")
+    
     try:
         result = run_orchestrator([user_msg], doc_text=pdf_text)
     except Exception as e:

@@ -4,7 +4,7 @@ import random
 import uuid
 from typing import Dict, Any, List
 import logging
-
+from utility import get_last_human_message
 logger = logging.getLogger("provider_agent")
 
 # Pools (use your original lists)
@@ -46,11 +46,7 @@ def provider_agent_node(state: Dict[str, Any]) -> Dict[str, Any]:
       - provider_last_updated: timestamp
       - messages: assistant message (tagged with agent: "provider")
     """
-    user_query = ""
-    for msg in reversed(state["messages"]):
-        if msg.type == "human":
-            user_query = msg.content
-            break
+    user_query = get_last_human_message(state)
 
     try:
         candidates = generate_providers(n=6, seed_text=user_query)

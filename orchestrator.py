@@ -13,6 +13,8 @@ from init_pdf import init_pdf_node
 from beneficiary_agent import beneficiary_agent_node
 from provider_agent import provider_agent_node
 from llm_utils import call_llm_json
+from utility import get_last_human_message
+
 
 logger = logging.getLogger("orchestrator_service")
 
@@ -42,67 +44,13 @@ class AgentState(TypedDict, total=False):
     final_answer: Optional[str]
 
 
-
 # Node function: decide route
 def orchestrator_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    user_query = ""
-    for msg in reversed(state["messages"]):
-        if msg.type == "human":
-            user_query = msg.content
-            break
+    user_query = get_last_human_message(state)
     payload = call_llm_json(ORCH_SYS, user_query, schema=OrchestratorOutput)
     route = payload.get("route", "finalize")
     logger.info("Orchestrator decided route -> %s", route)
     return {"route": route}
-
-# Finalize node: combine last agent outputs into final assistant reply
-# put this helper near the top of your orchestrator module (or a shared utils file)
-def _extract_msg_fields(msg):
-    """
-    Returns a tuple (role, content, metadata_dict)
-    Works for:
-      - plain dict messages (with keys like "role", "content", "agent", "response_key")
-      - LangChain/Graph message objects (HumanMessage/AIMessage) which have .type, .content, .metadata
-    Normalizes role to one of: "user"|"assistant"|"system"|"human" (we treat "human" same as "user").
-    """
-    # dict-like
-    if isinstance(msg, dict):
-        role = msg.get("role")
-        content = msg.get("content")
-        # metadata could be stored directly on dict
-        metadata = {k: v for k, v in msg.items() if k not in ("role", "content")}
-        return role, content, metadata
-
-    # object-like (LangChain message)
-    role = getattr(msg, "type", None) or getattr(msg, "role", None)
-    content = getattr(msg, "content", None)
-    # langchain message stores extra fields in .metadata often
-    metadata = {}
-    meta_obj = getattr(msg, "metadata", None)
-    if isinstance(meta_obj, dict):
-        metadata.update(meta_obj)
-    # also check attributes directly on the object for agent/response_key (defensive)
-    if hasattr(msg, "agent"):
-        metadata["agent"] = getattr(msg, "agent")
-    if hasattr(msg, "response_key"):
-        metadata["response_key"] = getattr(msg, "response_key")
-
-    # normalize role names (some libs use "human", some "user", some "ai")
-    if role:
-        r = role.lower()
-        if "human" in r:
-            role = "user"
-        elif "assistant" in r or "ai" in r:
-            role = "assistant"
-    else:
-        # fallback to class name
-        clsname = msg.__class__.__name__.lower()
-        if "human" in clsname:
-            role = "user"
-        elif "ai" in clsname or "assistant" in clsname:
-            role = "assistant"
-
-    return role, content, metadata
 
 def _get_message_content(msg) -> str:
     """Extract content safely from dict or LangChain message objects."""
@@ -111,16 +59,6 @@ def _get_message_content(msg) -> str:
     if isinstance(msg, dict):
         return msg.get("content", "")
     return str(msg)
-
-def _get_message_agent(msg) -> str | None:
-    """Extract agent tag if available."""
-    if isinstance(msg, dict):
-        return msg.get("agent")
-    if hasattr(msg, "metadata") and isinstance(msg.metadata, dict):
-        return msg.metadata.get("agent")
-    if hasattr(msg, "agent"):
-        return getattr(msg, "agent")
-    return None
 
 def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
     msgs = state.get("messages", []) or []
