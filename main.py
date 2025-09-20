@@ -3,6 +3,7 @@ import logging
 import os
 import io
 import uuid
+import json
 from typing import Tuple, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,20 +11,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import fitz  # PyMuPDF
 
-
-import os
 from dotenv import load_dotenv
-
-# Load environment variables from .env file
 load_dotenv(override=True)
 
-from orchestrator import run_orchestrator   # or app.orchestrator_service if you use package layout
-
+from orchestrator import run_orchestrator   # ensure this file is on path
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("main")
 
-# Config
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_PROMPT_CHARS = int(os.environ.get("MAX_PROMPT_CHARS", 28000))
@@ -38,15 +33,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# serve uploaded files
 app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")
 
-# In-memory doc store: {doc_id: {"name": ..., "pages": int, "text": "...", "file_path": "..."}}
 DOC_STORE = {}
 
-# -------------------------
-# Pydantic models
-# -------------------------
 class UploadResponse(BaseModel):
     doc_id: str
     name: str
@@ -68,11 +58,7 @@ class EmailRequest(BaseModel):
     conversation: str
 
 
-# -------------------------
-# Helpers
-# -------------------------
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> Tuple[str, int]:
-    """Extract text page-by-page from PDF bytes using PyMuPDF (fitz)."""
     stream = io.BytesIO(pdf_bytes)
     doc = fitz.open(stream=stream)
     pages = doc.page_count
@@ -84,9 +70,6 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> Tuple[str, int]:
     full_text = "\n\n".join([f"--- Page {i+1} ---\n{p}" for i,p in enumerate(text_pages)])
     return full_text, pages
 
-# -------------------------
-# Endpoints
-# -------------------------
 @app.post("/upload", response_model=UploadResponse)
 async def upload_pdf(file: UploadFile = File(...)):
     if file.content_type != "application/pdf":
@@ -97,11 +80,9 @@ async def upload_pdf(file: UploadFile = File(...)):
     filename = f"{doc_id}.pdf"
     path = os.path.join(UPLOAD_DIR, filename)
 
-    # save file
     with open(path, "wb") as f:
         f.write(contents)
 
-    # extract text (best-effort)
     try:
         full_text, pages = extract_text_from_pdf_bytes(contents)
     except Exception as e:
@@ -129,42 +110,45 @@ async def chat_endpoint(req: ChatRequest):
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="message must be provided")
 
-    # Build the user message for the orchestrator
     user_msg = {"role": "user", "content": req.message}
 
-    # If doc_id provided, get pdf_text from DOC_STORE and pass to orchestrator
     pdf_text = None
-    
     if req.doc_id:
         entry = DOC_STORE.get(req.doc_id)
         if not entry:
             raise HTTPException(status_code=404, detail="Document id not found")
         pdf_text = entry.get("text", "")
-    
+
     try:
         result = run_orchestrator([user_msg], doc_text=pdf_text)
     except Exception as e:
         logger.exception("Orchestrator run failed")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # final reply is in result["messages"][-1]["content"] if present
     final_reply = ""
     messages = result.get("messages") or []
-
-    last_msg = messages[-1]
-    # works for AIMessage/HumanMessage and dicts
-    if hasattr(last_msg, "content"):
-        final_reply = last_msg.content
-    elif isinstance(last_msg, dict):
-        final_reply = last_msg.get("content", "")
+    if not messages:
+        final_reply = ""
     else:
-        final_reply = str(last_msg)
-        
+        last_msg = messages[-1]
+        if hasattr(last_msg, "content"):
+            final_reply = last_msg.content
+        elif isinstance(last_msg, dict):
+            final_reply = last_msg.get("content", "")
+        else:
+            final_reply = str(last_msg)
+
+    # Ensure reply is string
+    if not isinstance(final_reply, str):
+        try:
+            final_reply = json.dumps(final_reply)
+        except Exception:
+            final_reply = str(final_reply)
+
     return ChatResponse(reply=final_reply, state=result)
 
 @app.post("/send-email")
 async def send_email(req: EmailRequest):
-    # Dummy: echo back what would be sent. No external emailing here.
     return {
         "status": "ok",
         "message": "Dummy send: email not actually delivered in this mock app.",
