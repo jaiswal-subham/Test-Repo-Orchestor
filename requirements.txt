@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+requests
+PyMuPDF        # fitz
+langchain-openai>=0.0.0 ; # optional - comment if not installing
+openai          # optional - comment if not installing
+langgraph       # if you use the same graph package (install only if needed)
+#python -m uvicorn main:app --reload
+
