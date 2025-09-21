@@ -44,7 +44,9 @@ class AgentState(TypedDict, total=False):
 
 def orchestrator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     user_query = get_last_human_message(state)
+    print(user_query)
     payload = call_llm_json(ORCH_SYS, user_query, schema=OrchestratorOutput)
+    print(payload)
     route = payload.get("route", "finalize")
     logger.info("Orchestrator decided route -> %s", route)
     return {"route": route}
