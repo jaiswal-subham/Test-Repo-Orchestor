@@ -1,18 +1,24 @@
 # app/main.py
+
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+
+
 import logging
 import os
 import io
 import uuid
 import json
-from typing import Tuple, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import fitz  # PyMuPDF
+from orchestrator import orchestrator_node
+from typing import List, Dict, Any,Tuple, Optional
 
-from dotenv import load_dotenv
-load_dotenv(override=True)
+
 
 from orchestrator import run_orchestrator   # ensure this file is on path
 
@@ -52,7 +58,11 @@ class ChatResponse(BaseModel):
     reply: str
     state: dict
 
+class RouteSimpleRequest(BaseModel):
+    messages: List[Dict[str, Any]]  # same format as your /chat messages
 
+class RouteSimpleResponse(BaseModel):
+    route: str
 
 
 def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> Tuple[str, int]:
@@ -66,6 +76,27 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> Tuple[str, int]:
         text_pages.append(text)
     full_text = "\n\n".join([f"--- Page {i+1} ---\n{p}" for i,p in enumerate(text_pages)])
     return full_text, pages
+
+@app.post("/route_simple", response_model=RouteSimpleResponse)
+async def route_simple(req: RouteSimpleRequest):
+    """
+    Minimal routing endpoint used by the shell app.
+
+    - Does NOT call init_pdf_node.
+    - Directly calls orchestrator_node with state={'messages': messages}.
+    - Returns {"route": "<provider|beneficiary|finalize>"}.
+    """
+    messages = req.messages or []
+    state: Dict[str, Any] = {"messages": messages}
+
+    try:
+        orch_res = orchestrator_node(state)
+        route = orch_res.get("route", "finalize")
+    except Exception as e:
+        logger.exception("orchestrator_node failed in /route_simple: %s", e)
+        route = "finalize"
+
+    return RouteSimpleResponse(route=route)
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload_pdf(file: UploadFile = File(...)):
